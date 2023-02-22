@@ -23,6 +23,9 @@ from ai4mat.data.data import (
 )
 
 
+print('Hello world')
+
+
 class Shells:
     def __init__(self, structure):
         self.structure = structure
