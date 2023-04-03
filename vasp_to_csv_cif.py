@@ -1,11 +1,10 @@
 from typing import Dict, List, Union
 import argparse
-import sys
-import numpy as np
-import pandas as pd
 from pathlib import Path
 import shutil
 from io import BytesIO
+
+from pymatgen.electronic_structure.core import Spin
 from tqdm.auto import tqdm
 import tarfile
 import logging
@@ -14,8 +13,8 @@ from pymatgen.io.vasp.outputs import Vasprun, Outcar
 from pymatgen.io.vasp.inputs import Poscar
 from pymatgen.io.cif import CifWriter
 import numpy.typing as npt
-sys.path.append('.')
-from ai4mat.data.data import read_structures_descriptions, copy_indexed_structures
+
+from utils import read_structures_descriptions, copy_indexed_structures
 
 
 def get_E1(eigenvalues: Dict[str, npt.NDArray], separate_spins: bool) -> List[float]:
@@ -45,7 +44,8 @@ def get_E1(eigenvalues: Dict[str, npt.NDArray], separate_spins: bool) -> List[fl
 def extract_data_from_vasp(
     vasprun_directory: Path,
     band_occupancy_tolerence: Union[float, None] = None,
-    separate_spins: bool = False) -> Dict[str, float]:
+    separate_spins: bool = False
+) -> Dict[str, float]:
     """
     Extracts relevant fields from VASP output.
     """
@@ -54,19 +54,23 @@ def extract_data_from_vasp(
     vasprun_output = vasp_folder / 'vasprun.xml'
     # Here we delegate the occupancy tolerance default to pymatgen
     if band_occupancy_tolerence is None:
-        vasprun_file = Vasprun(vasprun_output,
-                            parse_potcar_file=False,
-                            separate_spins=separate_spins,
-                            parse_dos=True)
+        vasprun_file = Vasprun(
+            str(vasprun_output),
+            parse_potcar_file=False,
+            separate_spins=separate_spins,
+            parse_dos=True
+        )
     else:
-        vasprun_file = Vasprun(vasprun_output,
-                            parse_potcar_file=False,
-                            separate_spins=separate_spins,
-                            occu_tol=band_occupancy_tolerence,
-                            parse_dos=True)
+        vasprun_file = Vasprun(
+            str(vasprun_output),
+            parse_potcar_file=False,
+            separate_spins=separate_spins,
+            occu_tol=band_occupancy_tolerence,
+            parse_dos=True
+        )
     data['energy'] = vasprun_file.final_energy
     data['fermi_level'] = vasprun_file.efermi
-    outcar = Outcar(vasp_folder / "OUTCAR")
+    outcar = Outcar(str(vasp_folder / "OUTCAR"))
     E_1 = get_E1(vasprun_file.eigenvalues, separate_spins)
     if separate_spins:
         assert len(E_1) == 2
@@ -81,6 +85,10 @@ def extract_data_from_vasp(
                 data[f'lumo_{kind}'], \
                 data[f'homo_{kind}'], _ = eigenvalue_band_properties[index]
             data[f'E_1_{kind}'] = E_1[index]
+
+        # process eigenvalues
+        data['spin_up_seq'] = str([x[0] for x in vasprun_file.eigenvalues[Spin(1)][0]])
+        data['spin_down_seq'] = str([x[0] for x in vasprun_file.eigenvalues[Spin(-1)][0]])
     else:
         assert len(E_1) == 1
         data['homo_lumo_gap'],\
@@ -115,11 +123,13 @@ def main():
     parser.add_argument("--separate-spins", action="store_true",
                         help="Report band gap separately for each spin channel")
     args = parser.parse_args()
+
     structures_description = read_structures_descriptions(args.input_structures_list)
     structures_list_path = Path(args.input_structures_list)
     input_VASP_dir = Path(args.input_vasp)
     output_csv_cif_dir = Path(args.output_csv_cif)
     output_csv_cif_dir.mkdir(parents=True, exist_ok=False)
+
     with tarfile.open(output_csv_cif_dir / 'initial.tar.gz', 'w:gz') as tar:
         for structure_id in tqdm(structures_description.index):
             structure_dir_candidates = list(input_VASP_dir.glob(args.vasprun_glob_prefix + structure_id))
@@ -130,9 +140,11 @@ def main():
             else:
                 structure_dir = structure_dir_candidates[0]
             try:
-                data = extract_data_from_vasp(structure_dir,
-                                            band_occupancy_tolerence=args.band_occupancy_tolerence,
-                                            separate_spins=args.separate_spins)
+                data = extract_data_from_vasp(
+                    structure_dir,
+                    band_occupancy_tolerence=args.band_occupancy_tolerence,
+                    separate_spins=args.separate_spins
+                )
             except (FileNotFoundError, ParseError) as e:
                 if args.allow_missing:
                     if isinstance(e, FileNotFoundError):
@@ -142,18 +154,23 @@ def main():
                     continue
                 else:
                     raise e
+
             structures_description.loc[structure_id, data.keys()] = data.values()
             if args.POSCARs_in_input_list:
-                structure = Poscar.from_file(structures_list_path / "poscars" / f"POSCAR_{structure_id}").structure
+                structure = Poscar.from_file(str(structures_list_path / "poscars" / f"POSCAR_{structure_id}")).structure
                 cif_string = str(CifWriter(structure)).encode('ASCII')
                 tar_info = tarfile.TarInfo(name=structure_id + '.cif')
-                tar_info.size=len(cif_string)
+                tar_info.size = len(cif_string)
                 tar.addfile(tar_info, BytesIO(cif_string))
+
     if args.input_structures_csv_cif:
-        copy_indexed_structures(structures_description.index,
-                                args.input_structures_csv_cif / 'initial.tar.gz',
-                                output_csv_cif_dir / 'initial.tar.gz')
-    structures_description.to_csv(output_csv_cif_dir / 'defects.csv.gz')
+        copy_indexed_structures(
+            structures_description.index,
+            args.input_structures_csv_cif / 'initial.tar.gz',
+            output_csv_cif_dir / 'initial.tar.gz'
+        )
+
+    structures_description.to_csv(output_csv_cif_dir / 'defects.csv')
     shutil.copyfile(structures_list_path / 'descriptors.csv', output_csv_cif_dir / 'descriptors.csv')
     pristine_path = Path(args.pristine_folder)
     shutil.copyfile(pristine_path / 'elements.csv', output_csv_cif_dir / 'elements.csv')

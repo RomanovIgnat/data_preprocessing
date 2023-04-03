@@ -12,18 +12,10 @@ from pymatgen.core.sites import PeriodicSite
 from pymatgen.io.cif import CifParser
 from pymatgen.analysis.local_env import CrystalNN
 
-import sys
-
-sys.path.append('.')
-
-from ai4mat.data.data import (
+from utils import (
     get_dichalcogenides_innopolis,
-    StorageResolver,
     Columns
 )
-
-
-print('Hello world')
 
 
 class Shells:
@@ -185,21 +177,17 @@ def get_sparse_defect(structure, unit_cell, supercell_size,
 def main():
     parser = argparse.ArgumentParser("Parses csv/cif into pickle and targets.csv.gz")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--input-folder", type=str)
+    group.add_argument("--input-folder", type=Path)
     group.add_argument("--input-name", type=str)
     parser.add_argument("--fill-missing-band-properties", action="store_true")
     parser.add_argument("--normalize-homo-lumo", action="store_true")
     parser.add_argument("--skip-eos", action="store_true",
                         help="Don't add EOS indices")
+    parser.add_argument("--processed-folder", type=Path, required=True)
     args = parser.parse_args()
 
-    storage_resolver = StorageResolver()
-    if args.input_folder:
-        dataset_name = Path(args.input_folder).name
-        input_folder = args.input_folder
-    else:
-        dataset_name = args.input_name
-        input_folder = storage_resolver["csv_cif"].joinpath(dataset_name)
+    dataset_name = Path(args.input_folder).name
+    input_folder = args.input_folder
 
     structures, defects = get_dichalcogenides_innopolis(input_folder)
     if (args.fill_missing_band_properties and
@@ -307,7 +295,7 @@ def main():
             structures["total_mag"] = 0.
             logging.info("Setting total_mag = 0")
 
-    save_dir = storage_resolver["processed"].joinpath(dataset_name)
+    save_dir = args.processed_folder.joinpath(dataset_name)
     save_dir.mkdir(exist_ok=True, parents=True)
     structures.to_pickle(
         save_dir.joinpath("data.pickle.gz"))
