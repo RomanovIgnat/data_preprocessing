@@ -87,8 +87,12 @@ def extract_data_from_vasp(
             data[f'E_1_{kind}'] = E_1[index]
 
         # process eigenvalues
-        data['spin_up_seq'] = str([x[0] for x in vasprun_file.eigenvalues[Spin(1)][0]])
-        data['spin_down_seq'] = str([x[0] for x in vasprun_file.eigenvalues[Spin(-1)][0]])
+        data['spin_up_seq'] = str([
+            x[0] for x in vasprun_file.eigenvalues[Spin(-1 * (indices['majority'] * 2 - 1))][0]
+        ])
+        data['spin_down_seq'] = str([
+            x[0] for x in vasprun_file.eigenvalues[Spin(-1 * (indices['minority'] * 2 - 1))][0]
+        ])
     else:
         assert len(E_1) == 1
         data['homo_lumo_gap'],\
